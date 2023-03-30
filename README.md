@@ -6,6 +6,9 @@ It will download audio file from s3, process it and upload the srt file to s3.
 
 Required python>=3.9 and install all dependencies using:
 - pip install requirements.txt
+- pip install transformers==4.26.1
+
+we have to install transformer separately due to versioning error with nemo lib
 
 Set up environment variables: Create .env file in the root folder and add following keys -
 ```commandline
