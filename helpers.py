@@ -3,6 +3,55 @@ import wget
 from omegaconf import OmegaConf
 import json
 import shutil
+import boto3
+from botocore.exceptions import ClientError
+from dotenv import load_dotenv
+
+load_dotenv()
+input_folder_name = "audio-data"
+srt_folder_name = "output-srt-data"
+bucket = os.environ.get("BUCKET_NAME")
+s3_client = boto3.client('s3',
+                         aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+                         aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY")
+                         )
+
+
+punct_model_langs = [
+    "en",
+    "fr",
+    "de",
+    "es",
+    "it",
+    "nl",
+    "pt",
+    "bg",
+    "pl",
+    "cs",
+    "sk",
+    "sl",
+]
+wav2vec2_langs = [
+    "en",
+    "fr",
+    "de",
+    "es",
+    "it",
+    "nl",
+    "pt",
+    "ja",
+    "zh",
+    "uk",
+    "pt",
+    "ar",
+    "ru",
+    "pl",
+    "hu",
+    "fi",
+    "fa",
+    "el",
+    "tr",
+]
 
 
 def create_config():
@@ -103,10 +152,10 @@ def get_first_word_idx_of_sentence(word_idx, word_list, speaker_list, max_words)
     )
     left_idx = word_idx
     while (
-        left_idx > 0
-        and word_idx - left_idx < max_words
-        and speaker_list[left_idx - 1] == speaker_list[left_idx]
-        and not is_word_sentence_end(left_idx - 1)
+            left_idx > 0
+            and word_idx - left_idx < max_words
+            and speaker_list[left_idx - 1] == speaker_list[left_idx]
+            and not is_word_sentence_end(left_idx - 1)
     ):
         left_idx -= 1
 
@@ -119,9 +168,9 @@ def get_last_word_idx_of_sentence(word_idx, word_list, max_words):
     )
     right_idx = word_idx
     while (
-        right_idx < len(word_list)
-        and right_idx - word_idx < max_words
-        and not is_word_sentence_end(right_idx)
+            right_idx < len(word_list)
+            and right_idx - word_idx < max_words
+            and not is_word_sentence_end(right_idx)
     ):
         right_idx += 1
 
@@ -133,11 +182,11 @@ def get_last_word_idx_of_sentence(word_idx, word_list, max_words):
 
 
 def get_realigned_ws_mapping_with_punctuation(
-    word_speaker_mapping, max_words_in_sentence=50
+        word_speaker_mapping, max_words_in_sentence=50
 ):
     is_word_sentence_end = (
         lambda x: x >= 0
-        and word_speaker_mapping[x]["word"][-1] in sentence_ending_punctuations
+                  and word_speaker_mapping[x]["word"][-1] in sentence_ending_punctuations
     )
     wsp_len = len(word_speaker_mapping)
 
@@ -151,9 +200,9 @@ def get_realigned_ws_mapping_with_punctuation(
     while k < len(word_speaker_mapping):
         line_dict = word_speaker_mapping[k]
         if (
-            k < wsp_len - 1
-            and speaker_list[k] != speaker_list[k + 1]
-            and not is_word_sentence_end(k)
+                k < wsp_len - 1
+                and speaker_list[k] != speaker_list[k + 1]
+                and not is_word_sentence_end(k)
         ):
             left_idx = get_first_word_idx_of_sentence(
                 k, words_list, speaker_list, max_words_in_sentence
@@ -169,14 +218,14 @@ def get_realigned_ws_mapping_with_punctuation(
                 k += 1
                 continue
 
-            spk_labels = speaker_list[left_idx : right_idx + 1]
+            spk_labels = speaker_list[left_idx: right_idx + 1]
             mod_speaker = max(set(spk_labels), key=spk_labels.count)
             if spk_labels.count(mod_speaker) < len(spk_labels) // 2:
                 k += 1
                 continue
 
-            speaker_list[left_idx : right_idx + 1] = [mod_speaker] * (
-                right_idx - left_idx + 1
+            speaker_list[left_idx: right_idx + 1] = [mod_speaker] * (
+                    right_idx - left_idx + 1
             )
             k = right_idx
 
@@ -227,7 +276,7 @@ def get_speaker_aware_transcript(sentences_speaker_mapping, f):
 
 
 def format_timestamp(
-    milliseconds: float, always_include_hours: bool = False, decimal_marker: str = "."
+        milliseconds: float, always_include_hours: bool = False, decimal_marker: str = "."
 ):
     assert milliseconds >= 0, "non-negative timestamp expected"
 
@@ -274,3 +323,38 @@ def cleanup(path: str):
         shutil.rmtree(path)
     else:
         raise ValueError("Path {} is not a file or dir.".format(path))
+
+
+def upload_file_to_s3(file_name, bucket, folder_name):
+    # Upload the file
+    try:
+        output_path = folder_name + "/" + os.path.basename(file_name)
+        response = s3_client.upload_file(file_name, str(bucket), output_path)
+    except ClientError as e:
+        print(str(e))
+        return False
+    return True
+
+
+def download_file_from_s3(file_name, bucket, folder_name):
+    # Download the file
+    try:
+        output_path = os.path.join("input_data", os.path.basename(file_name))
+        response = s3_client.download_file(Bucket=bucket, Key=file_name, Filename=output_path)
+    except ClientError as e:
+        print(str(e))
+        return None
+    return output_path
+
+
+def get_all_files_from_s3(bucket, folder_name):
+    try:
+        files_list = []
+
+        response = s3_client.list_objects(Bucket=bucket, Prefix=folder_name)
+        for content in response.get('Contents', [])[1:]:
+            files_list.append(content.get('Key'))
+        return files_list
+    except ClientError as e:
+        print(str(e))
+        return None
